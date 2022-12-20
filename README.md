@@ -28,7 +28,7 @@ So we decided to check, if more accurate solution of weighted low-rank approxima
 We implemented SVD, default FWSVD and FWSVD with 3 iterative methods for solving WLRA.
 `honest weighted low-rank` is the algorithm from [2], `nesterov` and `anderson` are accelerations of this algorithm, described in [3].
 
-The plots show the dependence of target metric (higher is better) on the rank of approximation on two tasks from GLUE benchmark.
+The plots show the dependence of target metric (higher is better) on the rank of approximation on two tasks from [GLUE](https://gluebenchmark.com/) benchmark.
 ![Plots](images/result.png)
 
 Takeaways:
@@ -67,3 +67,9 @@ for epoch in range(n_epochs):
     ... # finetune model
 
 ```
+
+### Sidenote
+
+We used a script from a private repository of Skoltech NLP Lab. Unfortunately, we can't share it, and we didn't have time to reimplement it and rerun the experiments, since it is would take several days.
+
+However, our implementation is not bounded to any specific training pipeline. So it is possible to adapt, for example, [this](https://github.com/huggingface/transformers/blob/main/examples/pytorch/text-classification/run_glue.py) script to incorporate FWSVD compression.
