@@ -9,9 +9,10 @@ from torch.utils.data import DataLoader
 from transformers import BertModel
 
 from .torch_utils import FWDense
+from .weighted_low_rank_decompositions import weighted_svd, nesterov, anderson
 
 
-def compute_decomposition(A: torch.Tensor, weights: Optional[torch.Tensor] = None, rank: Optional[int] = None):
+def compute_row_sum_svd_decomposition(A: torch.Tensor, weights: Optional[torch.Tensor] = None, rank: Optional[int] = None):
     """Computes FWSVD from https://arxiv.org/pdf/2207.00112.pdf.
 
     Args:
@@ -56,16 +57,16 @@ def compute_decomposition(A: torch.Tensor, weights: Optional[torch.Tensor] = Non
 
 def estimate_fisher_weights_bert(
     model: BertModel,
-    dataset: DataLoader,
+    dataloader: DataLoader,
     loss_fn: Optional[Callable] = None,
     compute_full: bool = True,
-    device: str = 'cpu'
+    device: str = 'cpu',
 ) -> Tuple:
     """Calculate Fisher information in each linear layer of the Bert-type model.
 
     Args:
       model (BertModel): BertModel instance from transformers package
-      dataset (Dataloader): instance of torch.utils.Dataloader with e.g. FineTuneDataset instance as dataset. 
+      dataloader (Dataloader): instance of torch.utils.Dataloader with e.g. FineTuneDataset instance as dataset. 
         Data on which the gradients will be computed.
       loss_fn (Optional[Callable]): loss function. If None (default),
         assume that model forward pass returns loss value.
@@ -82,7 +83,7 @@ def estimate_fisher_weights_bert(
     intermediate_dim = model.config.intermediate_size
     num_hidden_layers = model.config.num_hidden_layers
 
-    n_steps_per_epoch = len(dataset)
+    n_steps_per_epoch = len(dataloader)
     model = model.to(device)
     model.train()
 
@@ -93,7 +94,7 @@ def estimate_fisher_weights_bert(
         fisher_int = defaultdict(lambda: torch.zeros(hidden_dim, device='cpu'))
         fisher_out = defaultdict(lambda: torch.zeros(intermediate_dim, device='cpu'))
 
-    for inputs in tqdm(dataset, total=n_steps_per_epoch):
+    for inputs in tqdm(dataloader, total=n_steps_per_epoch):
         if isinstance(inputs, dict):
             for key, val in inputs.items():  # store all tensors to model device
                 if isinstance(val, torch.Tensor):
@@ -124,13 +125,14 @@ def estimate_fisher_weights_bert(
             fisher_int[i] += grad_int
             fisher_out[i] += grad_out
             
-    fisher_int = dict(map(lambda x: (x[0], x[1] / n_steps_per_epoch), fisher_int.items()))
-    fisher_out = dict(map(lambda x: (x[0], x[1] / n_steps_per_epoch), fisher_out.items()))
+    fisher_int = dict(map(lambda x: (x[0], x[1] / x[1].max()), fisher_int.items()))
+    fisher_out = dict(map(lambda x: (x[0], x[1] / x[1].max()), fisher_out.items()))
 
     return fisher_int, fisher_out
 
 
-def replace_dense2fw_bert(model: BertModel, fisher_int: Dict, fisher_out: Dict, rank: int = None) -> BertModel:
+def replace_dense2fw_bert(model: BertModel, fisher_int: Dict, fisher_out: Dict, rank: int = None, 
+                          low_rank_method: str = "row-sum-weighted-svd") -> BertModel:
     """Replace Dense layers to FWDense layers in bert-type model.
       See estimate_fisher_weights_bert output for more details.
       rank is the approx. rank in SVD decomposition.
@@ -138,11 +140,26 @@ def replace_dense2fw_bert(model: BertModel, fisher_int: Dict, fisher_out: Dict, 
     model = model.to('cpu')
     model.eval()
     
+    if low_rank_method == "row-sum-weighted-svd":
+        get_decomposition = compute_row_sum_svd_decomposition
+    elif low_rank_method == "weighted-svd":
+        get_decomposition = weighted_svd
+    elif low_rank_method == "nesterov":
+        get_decomposition = nesterov
+    elif low_rank_method == "anderson":
+        get_decomposition = anderson
+    else:
+        raise ValueError(f"Method {low_rank_method} for low rank factorization is not implemented")
+    
     for idx, weights in fisher_int.items():
         w_mat = model.bert.encoder.layer[idx].intermediate.dense.weight.data.transpose(0, 1)
         bias = model.bert.encoder.layer[idx].intermediate.dense.bias.data
 
-        left_w, right_w = compute_decomposition(w_mat, weights, rank=rank)
+        left_w, right_w = get_decomposition(w_mat, weights, rank)
+        
+        if torch.any(torch.isnan(left_w)) or torch.any(torch.isnan(right_w)):
+            raise RunTimeError("Nan in weights after decomposition")
+
         fw_dense = FWDense(input_dim=left_w.shape[0], hidden_dim=rank, output_dim=right_w.shape[1])
         fw_dense._init_weights(left_w, right_w, bias)
 
@@ -152,7 +169,11 @@ def replace_dense2fw_bert(model: BertModel, fisher_int: Dict, fisher_out: Dict, 
         w_mat = model.bert.encoder.layer[idx].output.dense.weight.data.transpose(0, 1)
         bias = model.bert.encoder.layer[idx].output.dense.bias.data
 
-        left_w, right_w = compute_decomposition(w_mat, weights, rank=rank)
+        left_w, right_w = get_decomposition(w_mat, weights, rank)
+
+        if torch.any(torch.isnan(left_w)) or torch.any(torch.isnan(right_w)):
+            raise RunTimeError("Nan in weights after decomposition")
+        
         fw_dense = FWDense(input_dim=left_w.shape[0], hidden_dim=rank, output_dim=right_w.shape[1])
         fw_dense._init_weights(left_w, right_w, bias)
 
