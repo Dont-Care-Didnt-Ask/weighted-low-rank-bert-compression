@@ -4,7 +4,7 @@ import copy
 from transformers import BertModel
 from torch.utils.data import DataLoader
 
-from .src.fwsvd import estimate_fisher_weights_bert, replace_dense2fw_bert
+from .fwsvd import estimate_fisher_weights_bert, replace_dense2fw_bert
 
 
 def compute_nd_replace_dense(
