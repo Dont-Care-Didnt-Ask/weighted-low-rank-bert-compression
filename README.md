@@ -3,6 +3,8 @@
 
 **Team members:** Seleznyov Mikhail, Galichin Andrey, Kovaleva Maria.
 
+## Setup
+
 There are various ways to compress large language models. 
 One of them is good old SVD, applied to weight matrices in linear layers. 
 However, it treats all parameters equally.
@@ -20,3 +22,34 @@ However, there are some iterative algorithms for weighted low-rank approximation
 for example, described in papers [Weighted Low-Rank Approximations](https://www.aaai.org/Papers/ICML/2003/ICML03-094.pdf) 
 and [Weighted Low-Rank Approximation and Acceleration](https://arxiv.org/pdf/2109.11057.pdf).
 So we decided to check, if more accurate solution of weighted low-rank approximation helps to compress language models more efficiently.
+
+## How to use
+
+First, make a conda environment, using `environment.yaml` file:
+
+```
+conda env create --file environment.yaml
+conda activate nlp
+```
+
+Then, to compress a model, you have to do something like this:
+
+```
+from transformers import AutoModelForSequenceClassification
+from src.compress_bert import compute_nd_replace_dense
+
+model = AutoModelForSequenceClassification.from_pretrained("bert-base-uncased")  # any BertModel is supported
+dataloader = ...  # task-specific
+
+for epoch in range(n_epochs):
+    ... # train model
+
+model = compute_nd_replace_dense(model, dataloader, rank=200)  # runs FWSVD compression
+
+# you may try to use the model right away
+
+# or finetune it
+for epoch in range(n_epochs):
+    ... # finetune model
+
+```
