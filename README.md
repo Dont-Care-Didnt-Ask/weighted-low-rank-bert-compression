@@ -3,6 +3,11 @@
 
 **Team members:** Seleznyov Mikhail, Galichin Andrey, Kovaleva Maria.
 
+Responsibilities:
+- Seleznyov: leading project, running experiments
+- Galichin: implementing Fisher Weighted SVD
+- Kovaleva: implementing accelerated algorithms, making presentation
+
 ## Setup
 
 There are various ways to compress large language models. 
